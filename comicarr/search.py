@@ -1791,6 +1791,52 @@ def _search_source_for_issue(issueid, entity_type=None):
     return db.select_one(select(weekly).where(weekly.c.IssueID == issueid)), "pullwant", True
 
 
+def _collapse_manga_search_targets(results):
+    """Collapse per-chapter manga wanted rows into volume-first search targets.
+
+    The backlog scan queues one job per wanted issue row. For manga every row is
+    a chapter, so licensed series -- whose indexers carry volumes, not chapters
+    -- were searched as c001 forever and never matched (Have stuck at 0). Route
+    them through the same blended plan the RSS path uses (search_plan_for_series):
+    unowned volumes for the back-catalogue, chapters only beyond the last
+    released volume, one search per volume rather than per chapter in it. The
+    existing volume-target path in search_init then searches ``v01``. Non-manga
+    results pass through untouched.
+    """
+    from comicarr.app.manga.acquisition import search_plan_for_series
+    from comicarr.app.manga.ledger import normalize_volume_number
+
+    passthrough = []
+    manga_by_series = {}
+    for r in results:
+        comic = db.select_one(select(comics).where(comics.c.ComicID == r["ComicID"]))
+        if comic is not None and series_kind.is_manga(comic):
+            manga_by_series.setdefault(r["ComicID"], {"comic": comic, "results": []})["results"].append(r)
+        else:
+            passthrough.append(r)
+
+    collapsed = []
+    for comicid, group in manga_by_series.items():
+        all_issues = [dict(i) for i in db.select_all(select(issues).where(issues.c.ComicID == comicid))]
+        plan = search_plan_for_series(dict(group["comic"]), all_issues)
+        volume_targets = {t["number"] for t in plan if t.get("kind") == "volume"}
+        chapter_target_ids = {t["id"] for t in plan if t.get("kind") == "chapter"}
+        vol_of = {i["IssueID"]: normalize_volume_number(i.get("VolumeNumber")) for i in all_issues}
+
+        seen_volumes = set()
+        for r in group["results"]:
+            vol = vol_of.get(r["IssueID"])
+            if vol is not None and vol in volume_targets:
+                if vol in seen_volumes:
+                    continue  # one search per volume, not once per chapter in it
+                seen_volumes.add(vol)
+                collapsed.append({**r, "manga_target": {"kind": "volume", "number": vol}})
+            elif r["IssueID"] in chapter_target_ids:
+                collapsed.append(r)  # frontier chapter beyond the last volume
+            # else: owned/covered/not a plan target -> drop
+    return passthrough + collapsed
+
+
 def searchforissue(
     issueid=None,
     new=False,
@@ -2053,6 +2099,8 @@ def searchforissue(
                                 }
 
                 stloop -= 1
+
+            results = _collapse_manga_search_targets(results)
 
             rss_queue = []
             if len(search_skip) > 0:
@@ -2603,6 +2651,12 @@ def searchforissue(
                             manga_chapter_number = manga_row["ChapterNumber"]
                         if "VolumeNumber" in manga_keys:
                             manga_volume_number = manga_row["VolumeNumber"]
+                        # A collapsed volume target searches the whole book
+                        # (v01), not the carrier chapter it rode in on.
+                        manga_target = result.get("manga_target")
+                        if manga_target and manga_target.get("kind") == "volume":
+                            manga_volume_number = manga_target["number"]
+                            manga_chapter_number = None
                     if smode == "want_ann":
                         ComicName = result["ReleaseComicName"]
                         Comicname_filesafe = None
