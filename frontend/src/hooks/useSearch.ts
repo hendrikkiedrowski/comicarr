@@ -86,6 +86,7 @@ export function useSearchManga(
   query: string,
   page = 1,
   sortBy = "relevance",
+  provider = "mangadex",
   options: Partial<
     UseQueryOptions<RawSearchResponse, Error, SearchResponse>
   > = {},
@@ -94,13 +95,14 @@ export function useSearchManga(
   const offset = (page - 1) * limit;
 
   return useQuery({
-    queryKey: ["search", "manga", query, page, sortBy],
+    queryKey: ["search", "manga", query, page, sortBy, provider],
     queryFn: () =>
       apiRequest<RawSearchResponse>("POST", "/api/search/manga", {
         name: query,
         limit,
         offset,
         sort: sortBy,
+        provider,
       }),
     select: (data: RawSearchResponse): SearchResponse => {
       if (Array.isArray(data)) {
