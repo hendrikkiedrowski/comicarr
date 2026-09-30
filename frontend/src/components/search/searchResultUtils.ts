@@ -5,6 +5,7 @@ export const SOURCE_LABELS: Record<string, string> = {
   metron: "Metron",
   mangadex: "MangaDex",
   mal: "MAL",
+  anilist: "AniList",
 };
 
 const htmlParser = new DOMParser();
