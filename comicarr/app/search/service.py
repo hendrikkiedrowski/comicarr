@@ -96,11 +96,18 @@ def find_comic(
         return {"error": "Search returned no results"}
 
 
-def find_manga(ctx, name, limit=None, offset=None, sort=None):
-    """Search for manga via MAL (primary) or MangaDex (fallback)."""
+def find_manga(ctx, name, limit=None, offset=None, sort=None, provider=None):
+    """Search for manga metadata.
+
+    provider explicitly picks the source: "anilist" (no key needed), "mal"
+    (needs MAL_CLIENT_ID), or "mangadex". When omitted, keeps the historical
+    auto behaviour: MAL if configured, else MangaDex. MangaDex still supplies
+    chapters regardless of which source the series is added from.
+    """
+    provider = (provider or "").strip().lower()
     mal_ok = getattr(ctx.config, "MAL_ENABLED", False) and getattr(ctx.config, "MAL_CLIENT_ID", None)
     mdex_ok = getattr(ctx.config, "MANGADEX_ENABLED", False)
-    if not ctx.config or not (mal_ok or mdex_ok):
+    if not ctx.config or not (provider == "anilist" or mal_ok or mdex_ok):
         return {"error": "Manga integration is not enabled"}
 
     try:
@@ -109,31 +116,46 @@ def find_manga(ctx, name, limit=None, offset=None, sort=None):
     except (ValueError, TypeError):
         return {"error": "Invalid pagination parameters"}
 
-    def add_in_library(manga):
-        manga["in_library"] = manga.get("haveit") != "No"
-        return manga
+    def enrich(searchresults):
+        if isinstance(searchresults, dict) and "results" in searchresults:
+            for manga in searchresults["results"]:
+                manga["in_library"] = manga.get("haveit") != "No"
+        return searchresults
 
-    mal_enabled = getattr(ctx.config, "MAL_ENABLED", False)
-    mal_client_id = getattr(ctx.config, "MAL_CLIENT_ID", None)
+    def run(module):
+        return enrich(module.search_manga(name, limit=parsed_limit, offset=parsed_offset, sort=sort))
 
-    if mal_enabled and mal_client_id:
+    if provider == "anilist":
+        from comicarr import anilist
+
+        return run(anilist)
+    if provider == "mal":
+        if not mal_ok:
+            return {"error": "MyAnimeList is not configured (set a MAL Client ID)"}
+        from comicarr import myanimelist
+
+        return run(myanimelist)
+    if provider == "mangadex":
+        from comicarr import mangadex
+
+        return run(mangadex)
+
+    # No explicit provider: historical auto behaviour (MAL primary, MangaDex fallback).
+    if mal_ok:
         from comicarr import myanimelist
 
         try:
-            searchresults = myanimelist.search_manga(name, limit=parsed_limit, offset=parsed_offset, sort=sort)
-            if isinstance(searchresults, dict) and "results" in searchresults:
-                searchresults["results"] = [add_in_library(m) for m in searchresults["results"]]
-                return searchresults
+            result = run(myanimelist)
+            if isinstance(result, dict) and "results" in result:
+                return result
         except Exception as e:
             logger.error("[SEARCH] MAL search failed, falling back to MangaDex: %s" % e)
 
     from comicarr import mangadex
 
-    searchresults = mangadex.search_manga(name, limit=parsed_limit, offset=parsed_offset, sort=sort)
-
-    if isinstance(searchresults, dict) and "results" in searchresults:
-        searchresults["results"] = [add_in_library(m) for m in searchresults["results"]]
-        return searchresults
+    result = run(mangadex)
+    if isinstance(result, dict) and "results" in result:
+        return result
     return {"error": "Search returned no results"}
 
 
@@ -174,8 +196,12 @@ def add_manga(ctx, manga_id):
     from comicarr import importer, series_kind
 
     try:
-        if series_kind.provider_of(manga_id) is series_kind.SeriesProvider.MYANIMELIST:
-            comic_id = series_kind.add_prefix(manga_id, series_kind.SeriesProvider.MYANIMELIST)
+        provider = series_kind.provider_of(manga_id)
+        # Keep an already-prefixed manga id (al-/mal-/md-) on its own provider;
+        # only bare ids default to MangaDex. Re-prefixing an al- id as MangaDex
+        # produced "md-al-...", which then resolved to neither.
+        if provider in series_kind.MANGA_PROVIDERS:
+            comic_id = series_kind.add_prefix(manga_id, provider)
         else:
             comic_id = series_kind.add_prefix(manga_id, series_kind.SeriesProvider.MANGADEX)
         importer.importer_thread([{"comicid": comic_id, "comicname": None, "seriesyear": None}])

@@ -89,7 +89,8 @@ const mangaSortMapping: Record<string, string> = {
 
 export default function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { comicsEnabled, comicsConfigured, mangaEnabled } = useContentSources();
+  const { comicsEnabled, comicsConfigured, mangaEnabled, mangaProviders } =
+    useContentSources();
 
   const urlQuery = searchParams.get("q") || "";
   const urlPage = parseInt(searchParams.get("page") || "1") || 1;
@@ -98,6 +99,13 @@ export default function SearchPage() {
   const view: SearchView =
     rawView === "grid" || rawView === "list" ? rawView : readSavedView();
   const isGridView = view === "grid";
+  const providerValues = mangaProviders.map((p) => p.value);
+  const rawProvider = searchParams.get("provider") || "";
+  const mangaProvider = providerValues.includes(
+    rawProvider as (typeof providerValues)[number],
+  )
+    ? rawProvider
+    : providerValues[0] || "mangadex";
 
   const rawType = searchParams.get("type");
   const urlType: ContentType | null =
@@ -134,6 +142,7 @@ export default function SearchPage() {
     searchMode === "manga" ? urlQuery : "",
     urlPage,
     mangaApiSort,
+    mangaProvider,
   );
   const activeSearch = searchMode === "manga" ? mangaSearch : comicSearch;
   const { data, isLoading, error } = activeSearch;
@@ -190,6 +199,13 @@ export default function SearchPage() {
     const params: Record<string, string> = Object.fromEntries(searchParams);
     params.view = newView;
     setSearchParams(params, { replace: true });
+  };
+
+  const handleProviderChange = (value: string) => {
+    const params: Record<string, string> = Object.fromEntries(searchParams);
+    params.provider = value;
+    params.page = "1";
+    setSearchParams(params);
   };
 
   const totalPages = pagination
@@ -293,6 +309,28 @@ export default function SearchPage() {
               <LayoutGrid className="w-3.5 h-3.5" />
             </button>
           </div>
+          {searchMode === "manga" && mangaProviders.length > 1 && (
+            <>
+              <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">
+                source
+              </span>
+              <Select
+                value={mangaProvider}
+                onValueChange={handleProviderChange}
+              >
+                <SelectTrigger className="h-8 text-[11px] w-[130px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {mangaProviders.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          )}
           <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">
             sort
           </span>
