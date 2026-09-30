@@ -325,6 +325,7 @@ def search_init(
     manga_volume_target = content_type == "manga" and is_volume_target(chapter_number, volume_number)
     if content_type == "manga":
         logger.fdebug("[SEARCH-MANGA] Manga content detected for %s" % ComicName)
+        AlternateSearch = _latin_only_alternates(AlternateSearch)
         # A VOLUME target deliberately does not go through AlternateSearch.
         # gen_altnames() splits that string on `!` and `#`, which shreds a term
         # like "Gantz! v01", and whatever survived would be ordered AFTER the
@@ -2653,9 +2654,19 @@ def searchforissue(
                             manga_volume_number = manga_row["VolumeNumber"]
                         # A collapsed volume target searches the whole book
                         # (v01), not the carrier chapter it rode in on.
+                        # Search a chapter that belongs to a volume AS that
+                        # volume (v01), not as the chapter. Licensed manga is
+                        # released as volumes, and the per-issue/queued path
+                        # never goes through the blended collapse, so without
+                        # this a queued chapter searches c001 forever. A
+                        # collapsed target still wins; otherwise any row that
+                        # carries a volume is a volume search, and only true
+                        # frontier chapters (no volume yet) stay chapter search.
                         manga_target = result.get("manga_target")
                         if manga_target and manga_target.get("kind") == "volume":
                             manga_volume_number = manga_target["number"]
+                            manga_chapter_number = None
+                        elif manga_volume_number not in (None, ""):
                             manga_chapter_number = None
                     if smode == "want_ann":
                         ComicName = result["ReleaseComicName"]
@@ -4292,6 +4303,29 @@ def searchforissue_checker(issueid, storedate, issuedate, digitaldate, info):
         return {"status": True, "reason": None}
     else:
         return {"status": False, "reason": "invalid issueid"}
+
+
+def _latin_only_alternates(alt_search):
+    """Drop alternate titles that English usenet indexers cannot match.
+
+    Manga carries native-script alternates (ワンピース, Ван Піс, وان پیس) from
+    the metadata provider. Usenet releases are named in English/romaji, so those
+    only multiply the query count while never matching -- the dominant cost of a
+    manga search. Keep an entry only when most of its letters are ASCII Latin
+    ("Wanpanman", "One-Punch Man" stay; "One Piece. Большой куш", mostly
+    Cyrillic and redundant with the base name, goes).
+    """
+    if not alt_search or alt_search == "None":
+        return alt_search
+    kept = []
+    for entry in alt_search.split("##"):
+        letters = [c for c in entry if c.isalpha()]
+        if not letters:
+            continue
+        latin = sum(1 for c in letters if c.isascii())
+        if latin * 2 >= len(letters):  # majority-Latin entries are searchable
+            kept.append(entry)
+    return "##".join(kept) if kept else "None"
 
 
 def _build_manga_search_terms(series_name, chapter_num, volume_num):
