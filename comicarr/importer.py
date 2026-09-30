@@ -249,6 +249,8 @@ def addComictoDB(
         return addMangaToDB(comicid, imported=imported, calledfrom=calledfrom)
     if provider is series_kind.SeriesProvider.MYANIMELIST:
         return addMangaToDB_MAL(comicid, imported=imported, calledfrom=calledfrom)
+    if provider is series_kind.SeriesProvider.ANILIST:
+        return addMangaToDB_AniList(comicid, imported=imported, calledfrom=calledfrom)
 
     from comicarr import metron
 
@@ -1493,6 +1495,144 @@ def addMangaToDB_MAL(mangaid, imported=None, calledfrom=None):
     helpers.ComicSort(comicorder=comicarr.COMICSORT, imported=mangaid)
 
     logger.info("[MAL] Successfully added manga: %s" % manga_name)
+    _emit_add_activity("succeeded", mangaid, comicname=manga_name)
+
+    return {"status": "complete", "comicid": mangaid, "comicname": manga_name, "content_type": "manga"}
+
+
+def addMangaToDB_AniList(mangaid, imported=None, calledfrom=None):
+    """Add a manga from AniList to the database, with chapters from MangaDex.
+
+    Mirrors addMangaToDB_MAL: AniList supplies the series metadata (clean
+    romaji/english/native title, synopsis, cover, status, staff) and exposes
+    ``idMal``, which resolves the MangaDex entry that supplies chapters.
+    """
+    from comicarr import anilist, mangadex
+    from comicarr.config import get_manga_destination
+
+    logger.info("[ANILIST] Adding manga with ID: %s" % mangaid)
+
+    mangaid = series_kind.add_prefix(mangaid, series_kind.SeriesProvider.ANILIST)
+
+    controlValueDict = {"ComicID": mangaid}
+
+    with db.get_engine().connect() as conn:
+        stmt = select(comics).where(comics.c.ComicID == mangaid)
+        dbmanga = next((dict(row._mapping) for row in conn.execute(stmt)), None)
+
+    if dbmanga is not None:
+        if dbmanga["Status"] == "Active":
+            series_status = "Active"
+        elif dbmanga["Status"] == "Paused":
+            series_status = "Paused"
+        else:
+            series_status = "Loading"
+        comlocation = dbmanga["ComicLocation"]
+    else:
+        series_status = "Loading"
+        comlocation = None
+
+    db.upsert("comics", {"Status": "Loading"}, controlValueDict)
+
+    manga = anilist.get_manga_details(mangaid)
+
+    if not manga:
+        logger.error("[ANILIST] Error fetching manga details for: %s" % mangaid)
+        if dbmanga is not None:
+            restore_status = series_status if series_status != "Loading" else "Active"
+            db.upsert("comics", {"Status": restore_status}, controlValueDict)
+        else:
+            db.upsert(
+                "comics",
+                {"ComicName": "Fetch failed, try refreshing. (%s)" % mangaid, "Status": "Active"},
+                controlValueDict,
+            )
+        _emit_add_activity("failed", mangaid, reason_detail="AniList details fetch failed")
+        return {"status": "incomplete"}
+
+    manga_name = manga.get("name", "Unknown")
+    manga_year = manga.get("year") or "0000"
+    description = manga.get("description", "No description available")
+
+    logger.info("[ANILIST] Now adding: %s (%s)" % (manga_name, manga_year))
+
+    sortname = manga_name[4:] if manga_name.startswith("The ") else manga_name
+    dynamic_name = helpers.filesafe(re.sub(r"[\'\!\@\#\$\%\:\;\/\\]", "", manga_name).lower())
+
+    manga_dest = get_manga_destination()
+    if manga_dest and not comlocation:
+        folder_format = comicarr.CONFIG.FOLDER_FORMAT or "$Series ($Year)"
+        folder_name = folder_format.replace("$Series", manga_name).replace("$Year", str(manga_year))
+        folder_name = helpers.filesafe(folder_name)
+        comlocation = os.path.join(manga_dest, folder_name)
+        if comicarr.CONFIG.CREATE_FOLDERS:
+            if not filechecker.validateAndCreateDirectory(comlocation, True):
+                logger.warn("[ANILIST] Error creating directory for %s" % manga_name)
+
+    status_mapping = {"ongoing": "Continuing", "completed": "Ended", "hiatus": "Continuing", "upcoming": "Continuing"}
+    comic_published = status_mapping.get(manga.get("status", "unknown"), "Unknown")
+
+    # AniList exposes idMal; reuse the MangaDex MAL resolver to find the chapter
+    # source. A missing idMal falls back to title similarity inside find_by_mal_id.
+    mangadex_uuid = mangadex.find_by_mal_id(
+        manga.get("mal_id") or "",
+        title_hint=manga_name,
+        alternate_titles=manga.get("alt_titles", []),
+    )
+
+    comic_values = {
+        "ComicID": mangaid,
+        "ComicName": manga_name,
+        "ComicSortName": sortname,
+        "ComicYear": str(manga_year),
+        "Status": series_status if series_status != "Loading" else "Active",
+        "ComicPublished": comic_published,
+        "ComicPublisher": manga.get("author", "Unknown"),
+        "Description": description[:4000] if description else None,
+        "ComicImage": manga.get("cover_url"),
+        "ComicImageURL": manga.get("cover_url"),
+        "DetailURL": manga.get("url"),
+        "DynamicComicName": dynamic_name,
+        "ComicLocation": comlocation,
+        "Type": "Manga",
+        "ContentType": (
+            dbmanga["ContentType"]
+            if dbmanga is not None and dbmanga.get("ContentType") in ("comic", "manga")
+            else "manga"
+        ),
+        "ReadingDirection": manga.get("reading_direction", "rtl"),
+        "MetadataSource": "anilist",
+        "ExternalID": manga.get("anilist_id"),
+        "MalID": manga.get("mal_id"),
+        "MangaDexID": mangadex_uuid,
+        "LastUpdated": helpers.now(),
+        "DateAdded": helpers.today() if dbmanga is None else dbmanga.get("DateAdded", helpers.today()),
+    }
+
+    alt_titles = manga.get("alt_titles", [])
+    if alt_titles:
+        comic_values["AlternateSearch"] = "##".join(alt_titles[:5])
+
+    db.upsert("comics", comic_values, controlValueDict)
+
+    cover_url = manga.get("cover_url")
+    if cover_url:
+        try:
+            covercheck = helpers.getImage(mangaid, cover_url)
+            if covercheck["status"] == "success":
+                db.upsert(
+                    "comics",
+                    {"ComicImage": helpers.replacetheslash(os.path.join("cache", str(mangaid) + ".jpg"))},
+                    controlValueDict,
+                )
+        except Exception as e:
+            logger.warn("[ANILIST] Failed to cache cover for %s: %s" % (manga_name, e))
+
+    _populate_manga_chapters(mangaid, manga_name, mangadex_uuid, manga.get("last_chapter"), controlValueDict)
+
+    helpers.ComicSort(comicorder=comicarr.COMICSORT, imported=mangaid)
+
+    logger.info("[ANILIST] Successfully added manga: %s" % manga_name)
     _emit_add_activity("succeeded", mangaid, comicname=manga_name)
 
     return {"status": "complete", "comicid": mangaid, "comicname": manga_name, "content_type": "manga"}
