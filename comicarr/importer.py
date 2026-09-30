@@ -1096,6 +1096,16 @@ def _populate_manga_chapters(mangaid, manga_name, mangadex_uuid, mal_num_chapter
         logger.info("[MANGA-IMPORT] Fetching chapters for: %s" % manga_name)
         chapters = mangadex.get_all_chapters(mdex_id)
 
+        # MangaDex chapter titles are scanlator-submitted free text and are
+        # routinely in another language (or absent) even on an upload tagged as
+        # the preferred one. Trust the title only when the chosen chapter is
+        # actually in the reader's first configured language; otherwise fall
+        # back to "Chapter N". This keeps genuine titles like "Romance Dawn"
+        # (an English upload) while dropping "صقل النفس" on a chapter only a
+        # non-preferred language uploaded.
+        preferred_languages = mangadex._get_languages()
+        preferred_language = preferred_languages[0] if preferred_languages else "en"
+
         if chapters:
             for chapter in chapters:
                 chapter_num = chapter.get("chapter")
@@ -1103,6 +1113,12 @@ def _populate_manga_chapters(mangaid, manga_name, mangadex_uuid, mal_num_chapter
                     continue
 
                 issue_id = "%s-ch%s" % (mangaid, chapter_num)
+
+                chapter_title = chapter.get("title")
+                if chapter_title and (chapter.get("language") or "").lower() == preferred_language:
+                    issue_name = chapter_title
+                else:
+                    issue_name = "Chapter %s" % chapter_num
 
                 release_date = (
                     chapter.get("release_date") or chapter.get("publish_at", "")[:10]
@@ -1115,7 +1131,7 @@ def _populate_manga_chapters(mangaid, manga_name, mangadex_uuid, mal_num_chapter
                     "ComicID": mangaid,
                     "ComicName": manga_name,
                     "Issue_Number": str(chapter_num),
-                    "IssueName": chapter.get("title") or ("Chapter %s" % chapter_num),
+                    "IssueName": issue_name,
                     "ReleaseDate": release_date,
                     "IssueDate": release_date,
                     "Int_IssueNumber": helpers.issuedigits(chapter_num),
