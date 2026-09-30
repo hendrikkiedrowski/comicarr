@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.42.0
+
+### Minor Changes
+
+- d5c94a1: Add AniList as a manga metadata source, alongside MangaDex and MyAnimeList. The manga search gains a source selector to pick which provider supplies series metadata (title, description, cover, status) — AniList gives clean english/romaji/native titles and needs no API key — while MangaDex continues to supply the chapters for whichever provider you add the series from. Because AniList needs no configuration, manga search is now always available even before MangaDex or MyAnimeList is set up.
+
+### Patch Changes
+
+- e06024c: Manga chapters now display in your preferred language. When more than one language is enabled in Settings → MangaDex, a chapter that exists in several languages no longer shows up (or gets overwritten) in a language you did not pick — Comicarr keeps the earliest language in your configured list and falls back to the others only for chapters that language does not have. Chapter names also stop showing scanlator titles in the wrong language: a chapter's title is used only when that chapter is in your first configured language, otherwise it is named "Chapter N" (so "Romance Dawn" is kept, but a chapter only a Portuguese or Arabic scanlator uploaded no longer lands in your English library under a foreign title).
+- 146a8b8: Manga searches are much faster and actually find volumes. Queuing chapters of a series that is released in volumes now searches for the volume (v01) instead of each chapter one by one, on every search path — not just the scheduled scan. Native-script alternate titles (Japanese, Cyrillic, Arabic) are no longer used as usenet queries, since indexers name releases in English/romaji and those only slowed every search down without ever matching.
+- 29b72ff: Manga automatic search now looks for volumes, not individual chapters. Popular licensed series are released as volumes on indexers, so searching each chapter one by one never found anything and downloads never progressed. The backlog scan now searches the missing volumes for a series' back catalogue and only searches individual chapters past the last released volume, matching how the RSS search already worked.
+
 ## 0.41.0
 
 ### Minor Changes
