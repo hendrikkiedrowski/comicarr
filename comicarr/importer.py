@@ -1096,6 +1096,12 @@ def _populate_manga_chapters(mangaid, manga_name, mangadex_uuid, mal_num_chapter
         logger.info("[MANGA-IMPORT] Fetching chapters for: %s" % manga_name)
         chapters = mangadex.get_all_chapters(mdex_id)
 
+        # The language-filtered feed often carries no volume for a licensed
+        # series (the English upload was DMCA'd), leaving every row
+        # volume-less so volume-search never fires. The unfiltered aggregate
+        # still knows each chapter's volume; use it as a fallback.
+        volume_map = mangadex.get_chapter_volume_map(mdex_id)
+
         if chapters:
             for chapter in chapters:
                 chapter_num = chapter.get("chapter")
@@ -1120,7 +1126,9 @@ def _populate_manga_chapters(mangaid, manga_name, mangadex_uuid, mal_num_chapter
                     "IssueDate": release_date,
                     "Int_IssueNumber": helpers.issuedigits(chapter_num),
                     "ChapterNumber": str(chapter_num),
-                    "VolumeNumber": str(chapter.get("volume")) if chapter.get("volume") else None,
+                    "VolumeNumber": (
+                        str(chapter.get("volume")) if chapter.get("volume") else volume_map.get(str(chapter_num))
+                    ),
                 }
                 if issue_id not in existing_issue_ids:
                     issue_status = "Skipped"

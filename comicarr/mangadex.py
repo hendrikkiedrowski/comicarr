@@ -692,6 +692,38 @@ def _aggregate_values(container):
     return []
 
 
+# Volume keys MangaDex uses for chapters not (yet) collected into a volume.
+# Must not be treated as a real volume, or frontier chapters would route to
+# volume-search and never be found.
+_NO_VOLUME_KEYS = {None, "", "none", "None"}
+
+
+def _iter_aggregate_pairs(data):
+    """Yield (chapter_str, volume_key_or_None) from an unfiltered aggregate.
+
+    "volumes" is normally a dict keyed by volume number, but MangaDex sends a
+    bare list when empty or (seen in the wild) as a list of volume objects
+    with no key at all - those yield volume=None rather than crashing (#765).
+    """
+    volumes = data.get("volumes") if isinstance(data, dict) else None
+    if isinstance(volumes, dict):
+        items = volumes.items()
+    elif isinstance(volumes, list):
+        items = ((None, v) for v in volumes)
+    else:
+        items = []
+    for vol_key, volume_data in items:
+        if not isinstance(volume_data, dict):
+            continue
+        vol = None if vol_key in _NO_VOLUME_KEYS else str(vol_key)
+        for ch_data in _aggregate_values(volume_data.get("chapters")):
+            if not isinstance(ch_data, dict):
+                continue
+            chapter_num = ch_data.get("chapter")
+            if chapter_num is not None:
+                yield str(chapter_num), vol
+
+
 def get_total_chapter_count(manga_id):
     """
     Get the total number of chapters for a manga, regardless of language.
@@ -717,20 +749,33 @@ def get_total_chapter_count(manga_id):
         logger.error("[MANGADEX] Failed to fetch unfiltered aggregate for manga %s" % manga_id)
         return 0
 
-    chapter_numbers = set()
-    for volume_data in _aggregate_values(data.get("volumes")):
-        if not isinstance(volume_data, dict):
-            continue
-        for ch_data in _aggregate_values(volume_data.get("chapters")):
-            if not isinstance(ch_data, dict):
-                continue
-            chapter_num = ch_data.get("chapter")
-            if chapter_num is not None:
-                chapter_numbers.add(str(chapter_num))
-
+    chapter_numbers = {ch for ch, _vol in _iter_aggregate_pairs(data)}
     total = len(chapter_numbers)
     logger.info("[MANGADEX] Unfiltered aggregate: %d total chapters for manga %s" % (total, manga_id))
     return total
+
+
+def get_chapter_volume_map(manga_id):
+    """Map chapter number -> volume number from the unfiltered aggregate.
+
+    Fills the gap where the language-filtered chapter feed carries no volume
+    (a chapter with no upload in the preferred language still appears here,
+    under its volume). Chapters not collected into a volume (frontier, or
+    absent from MangaDex entirely) are omitted, so callers fall back to
+    chapter-search for them.
+
+    ponytail: a second call to the same endpoint get_total_chapter_count
+    already hits. Left uncached/unmerged on purpose - no autouse cache-reset
+    fixture exists in this suite, and a shared cache here broke test
+    isolation across every test in this file. One extra request on a rare
+    import/refresh path is cheaper than that hazard.
+    """
+    manga_id = series_kind.strip_prefix(manga_id)
+    data = _make_request("/manga/%s/aggregate" % manga_id, params={})
+    if not data or data.get("result") != "ok":
+        logger.error("[MANGADEX] Failed to fetch aggregate for volume map of %s" % manga_id)
+        return {}
+    return {ch: vol for ch, vol in _iter_aggregate_pairs(data) if vol is not None}
 
 
 def get_all_chapters(manga_id, languages=None, include_unavailable=True):
