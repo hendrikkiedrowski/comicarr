@@ -85,6 +85,7 @@ def search_manga(
         limit=request_body.get("limit"),
         offset=request_body.get("offset"),
         sort=request_body.get("sort"),
+        provider=request_body.get("provider"),
     )
 
     if isinstance(result, dict) and "error" in result:
