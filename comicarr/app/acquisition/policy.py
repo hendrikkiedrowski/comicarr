@@ -41,6 +41,15 @@ class EligibilityInput:
     digital_date: str | datetime.date | None = None
     issue_date: str | datetime.date | None = None
     paused: bool = False
+    # Age-scaled search backoff. When apply_cooldown is on and an already-
+    # released issue was searched within its cooldown window, it is held back so
+    # a large unfindable backlog (e.g. a 1000+ chapter manga usenet does not
+    # carry) cannot monopolise the serial search queue every scan. Manual and
+    # interactive searches pass apply_cooldown=False and are never held.
+    last_search: str | float | int | None = None
+    apply_cooldown: bool = False
+    cooldown_base_hours: float = 6.0
+    cooldown_max_hours: float = 336.0
 
 
 @dataclass(frozen=True)
@@ -124,7 +133,42 @@ def _select_date(item):
     return None, None, supplied
 
 
-def evaluate_eligibility(item, today=None):
+def search_cooldown_hours(age_days, base_hours, max_hours):
+    """Age-scaled backoff: search fresh releases often, stale ones rarely.
+
+    Cooldown doubles for every week the release is old, so a just-out issue is
+    retried every ``base_hours`` while a years-old chapter that never appears is
+    retried at most every ``max_hours``. base_hours <= 0 disables the backoff.
+    """
+    if base_hours <= 0:
+        return 0.0
+    if age_days <= 0:
+        return float(base_hours)
+    # ponytail: doubling-per-week curve with a hard cap. Two knobs, no table.
+    # Swap the 7.0 for a config knob only if a user actually wants a different
+    # slope — nobody has yet.
+    hours = base_hours * (2 ** min(age_days / 7.0, 20))
+    return float(min(hours, max_hours))
+
+
+def _within_search_cooldown(item, selected_date, today, now_ts):
+    if not item.apply_cooldown or item.last_search in (None, ""):
+        return False
+    try:
+        last_ts = float(item.last_search)
+    except (TypeError, ValueError):
+        return False
+    if last_ts <= 0:
+        return False
+    age_days = (today - selected_date).days
+    cooldown = search_cooldown_hours(age_days, item.cooldown_base_hours, item.cooldown_max_hours)
+    if cooldown <= 0:
+        return False
+    now_ts = now_ts if now_ts is not None else datetime.datetime.now(datetime.timezone.utc).timestamp()
+    return (now_ts - last_ts) < cooldown * 3600.0
+
+
+def evaluate_eligibility(item, today=None, now_ts=None):
     """Apply the shared released/missing acquisition policy."""
 
     today = today or datetime.date.today()
@@ -148,4 +192,6 @@ def evaluate_eligibility(item, today=None):
         return EligibilityDecision(False, "invalid_date" if supplied else "missing_date")
     if selected_date > today:
         return EligibilityDecision(False, "future", selected_date, source)
+    if _within_search_cooldown(item, selected_date, today, now_ts):
+        return EligibilityDecision(False, "search_cooldown", selected_date, source)
     return EligibilityDecision(True, "released", selected_date, source)

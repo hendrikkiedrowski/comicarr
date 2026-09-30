@@ -1891,6 +1891,7 @@ def searchforissue(
                                     "LegacyStatus": iss["Status"],
                                     "AcquisitionIntent": iss.get("AcquisitionIntent"),
                                     "SeriesStatus": iss["SeriesStatus"],
+                                    "LastSearch": iss.get("LastSearch"),
                                 },
                             },
                         )
@@ -1949,6 +1950,7 @@ def searchforissue(
                                         "LegacyStatus": iss["Status"],
                                         "AcquisitionIntent": None,
                                         "SeriesStatus": iss["SeriesStatus"],
+                                        "LastSearch": iss.get("LastSearch"),
                                     },
                                 },
                             )
@@ -2015,6 +2017,7 @@ def searchforissue(
                                     "LegacyStatus": iss["Status"],
                                     "AcquisitionIntent": iss.get("AcquisitionIntent"),
                                     "SeriesStatus": iss["SeriesStatus"],
+                                    "LastSearch": iss.get("LastSearch"),
                                 },
                             },
                         )
@@ -4218,6 +4221,7 @@ def searchforissue_checker(issueid, storedate, issuedate, digitaldate, info):
                 release_date=storedate,
                 digital_date=digitaldate,
                 issue_date=issuedate,
+                interactive=bool(info.get("interactive", False)),
             )
 
         isscheck = helpers.issue_status(issueid)

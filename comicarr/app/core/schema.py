@@ -61,6 +61,7 @@ _REVISION_INTRODUCED_TABLES = {
     "0007_interactive_search_progress": frozenset(),
     "0008_manga_series_modes": frozenset(),
     "0009_chat_actions": frozenset(),
+    "0010_search_cooldown": frozenset(),
 }
 _READINGLIST_TO_STORYARCS_COLUMNS = (
     "StoryArcID",

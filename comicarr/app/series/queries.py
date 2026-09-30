@@ -168,11 +168,13 @@ def get_search_candidate_state(issue_id, entity_type=None):
         acquisition_intent = (table.c.AcquisitionIntent if "AcquisitionIntent" in table.c else literal(None)).label(
             "AcquisitionIntent"
         )
+        last_search = (table.c.LastSearch if "LastSearch" in table.c else literal(None)).label("LastSearch")
         stmt = (
             select(
                 table.c.Status.label("LegacyStatus"),
                 acquisition_intent,
                 t_comics.c.Status.label("SeriesStatus"),
+                last_search,
             )
             .select_from(table.outerjoin(t_comics, t_comics.c.ComicID == table.c.ComicID))
             .where(identity == str(issue_id), *extra_conditions)

@@ -172,6 +172,10 @@ _KEYS: tuple[ConfigKey, ...] = (
     ConfigKey("SCAN_ON_SERIES_CHANGES", bool, "General", True),
     ConfigKey("CLEAR_PROVIDER_TABLE", bool, "General", False),
     ConfigKey("SEARCH_TIER_CUTOFF", int, "General", 14),
+    # Age-scaled search backoff. Base cooldown for a just-released issue; doubles
+    # per week of release age up to the max. Base 0 disables the backoff.
+    ConfigKey("SEARCH_COOLDOWN_BASE_HOURS", int, "General", 6, readable=True, writable=True),
+    ConfigKey("SEARCH_COOLDOWN_MAX_HOURS", int, "General", 336, readable=True, writable=True),
     ConfigKey("RSS_CHECKINTERVAL", int, "Scheduler", 20, readable=True, writable=True, interval_for="rss"),
     ConfigKey("SEARCH_INTERVAL", int, "Scheduler", 1440, readable=True, writable=True, interval_for="search"),
     ConfigKey("DOWNLOAD_SCAN_INTERVAL", int, "Scheduler", 5, readable=True, writable=True, interval_for="monitor"),

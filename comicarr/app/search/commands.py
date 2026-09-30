@@ -14,8 +14,10 @@ from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
 import comicarr
+from comicarr import db
 from comicarr.app.acquisition.models import DispatchState, ItemOutcome
 from comicarr.app.acquisition.policy import EligibilityInput, evaluate_eligibility, project_legacy_state
+from comicarr.app.common.dates import utctimestamp
 from comicarr.app.search.queue import INTERACTIVE, RECOVERY, ROUTINE
 
 
@@ -23,8 +25,13 @@ class SearchCommandError(ValueError):
     """Raised when queued search work cannot be identified safely."""
 
 
-def evaluate_search_candidate(candidate, *, release_date, digital_date, issue_date):
-    """Apply the shared U8 eligibility policy to a database candidate."""
+def evaluate_search_candidate(candidate, *, release_date, digital_date, issue_date, interactive=False):
+    """Apply the shared U8 eligibility policy to a database candidate.
+
+    ``interactive`` marks a user-driven (manual / interactive) search, which is
+    always exempt from the automatic search backoff — only routine backlog and
+    RSS discovery honour the cooldown.
+    """
     values = {str(key).lower(): value for key, value in candidate.items()}
     projection = project_legacy_state(values.get("acquisitionintent"), values.get("legacystatus"))
     raw_series_status = values.get("seriesstatus")
@@ -38,6 +45,10 @@ def evaluate_search_candidate(candidate, *, release_date, digital_date, issue_da
             release_date=release_date,
             digital_date=digital_date,
             issue_date=issue_date,
+            last_search=values.get("lastsearch"),
+            apply_cooldown=not interactive,
+            cooldown_base_hours=float(getattr(comicarr.CONFIG, "SEARCH_COOLDOWN_BASE_HOURS", 6)),
+            cooldown_max_hours=float(getattr(comicarr.CONFIG, "SEARCH_COOLDOWN_MAX_HOURS", 336)),
         )
     )
     return {"status": decision.eligible, "reason": None if decision.eligible else decision.reason}
@@ -216,7 +227,21 @@ def enqueue_search_command(
         DispatchState.ACCEPTED,
     )
     ledger.record_dispatch(effective_run_id, DispatchState.ACCEPTED)
+    _stamp_last_search(command)
     return command
+
+
+def _stamp_last_search(command):
+    """Record when an issue was last dispatched to search, for the age-scaled
+    backoff in :func:`evaluate_search_candidate`. Best-effort: a failure here
+    must never fail the search itself."""
+    table = {"issue": "issues", "annual": "annuals"}.get(command.entity_type)
+    if table is None:
+        return
+    try:
+        db.upsert(table, {"LastSearch": str(utctimestamp())}, {"IssueID": command.issueid})
+    except Exception:
+        pass
 
 
 def enqueue_failed_download_retry(

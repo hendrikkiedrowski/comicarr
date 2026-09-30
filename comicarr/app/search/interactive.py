@@ -584,6 +584,8 @@ def _candidate_eligibility(entity):
         {
             "candidate": candidate,
             "entity_type": entity["entity_type"],
+            # Interactive grab: never withheld by the automatic search backoff.
+            "interactive": True,
         },
     )
 

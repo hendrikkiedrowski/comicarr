@@ -136,6 +136,7 @@ issues = Table(
     Column("inCacheDIR", Text),
     Column("ChapterNumber", Text),
     Column("VolumeNumber", Text),
+    Column("LastSearch", Text),
     UniqueConstraint("IssueID", name="uq_issues_issueid"),
 )
 
@@ -161,6 +162,7 @@ annuals = Table(
     Column("IssueDate_Edit", Text),
     Column("DateAdded", Text),
     Column("Deleted", Integer, server_default="0"),
+    Column("LastSearch", Text),
     UniqueConstraint("IssueID", name="uq_annuals_issueid"),
 )
 
@@ -214,6 +216,7 @@ storyarcs = Table(
     Column("Aliases", Text),
     Column("ArcImage", Text),
     Column("StoreDate", Text),
+    Column("LastSearch", Text),
     UniqueConstraint("IssueArcID", name="uq_storyarcs_issuearcid"),
 )
 
