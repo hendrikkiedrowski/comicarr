@@ -43,13 +43,15 @@ class SeriesProvider(str, Enum):
     COMICVINE = "comicvine"
     MANGADEX = "mangadex"
     MYANIMELIST = "myanimelist"
+    ANILIST = "anilist"
 
 
-MANGA_PROVIDERS = frozenset({SeriesProvider.MANGADEX, SeriesProvider.MYANIMELIST})
+MANGA_PROVIDERS = frozenset({SeriesProvider.MANGADEX, SeriesProvider.MYANIMELIST, SeriesProvider.ANILIST})
 
 _PROVIDER_PREFIXES: dict[SeriesProvider, str] = {
     SeriesProvider.MANGADEX: "md-",
     SeriesProvider.MYANIMELIST: "mal-",
+    SeriesProvider.ANILIST: "al-",
 }
 
 _MANGA_CONTENT_TYPE = "manga"
