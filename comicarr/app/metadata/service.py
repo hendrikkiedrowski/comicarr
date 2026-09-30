@@ -47,18 +47,36 @@ def search_comics(
     )
 
 
-def search_manga(ctx, name, limit=None, offset=None, sort=None):
-    """Search for manga via MangaDex API."""
-    if not ctx.config or not getattr(ctx.config, "MANGADEX_ENABLED", False):
-        return {"error": "MangaDex integration is not enabled"}
+def search_manga(ctx, name, limit=None, offset=None, sort=None, provider="mangadex"):
+    """Search for manga via the selected metadata provider.
 
-    from comicarr import mangadex
+    provider: "mangadex" (default), "mal" (MyAnimeList), or "anilist". MangaDex
+    still supplies chapters regardless of which provider the series is added
+    from; the choice only decides where series metadata comes from.
+    """
+    provider = (provider or "mangadex").strip().lower()
 
     try:
         parsed_limit = int(limit) if limit else None
         parsed_offset = int(offset) if offset else None
     except (ValueError, TypeError):
         return {"error": "Invalid pagination parameters"}
+
+    if provider == "anilist":
+        from comicarr import anilist
+
+        return anilist.search_manga(name, limit=parsed_limit, offset=parsed_offset, sort=sort)
+
+    if provider == "mal":
+        if not ctx.config or not getattr(ctx.config, "MAL_CLIENT_ID", None):
+            return {"error": "MyAnimeList is not configured (set a MAL Client ID)"}
+        from comicarr import myanimelist
+
+        return myanimelist.search_manga(name, limit=parsed_limit, offset=parsed_offset, sort=sort)
+
+    if not ctx.config or not getattr(ctx.config, "MANGADEX_ENABLED", False):
+        return {"error": "MangaDex integration is not enabled"}
+    from comicarr import mangadex
 
     return mangadex.search_manga(name, limit=parsed_limit, offset=parsed_offset, sort=sort)
 
