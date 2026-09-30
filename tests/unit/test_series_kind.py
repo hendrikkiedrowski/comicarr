@@ -52,7 +52,11 @@ class TestProviderOf:
         assert provider_of(12345) is SeriesProvider.COMICVINE
 
     def test_the_manga_providers_are_the_prefixed_ones(self):
-        assert MANGA_PROVIDERS == {SeriesProvider.MANGADEX, SeriesProvider.MYANIMELIST}
+        assert MANGA_PROVIDERS == {
+            SeriesProvider.MANGADEX,
+            SeriesProvider.MYANIMELIST,
+            SeriesProvider.ANILIST,
+        }
 
 
 class TestIsManga:
