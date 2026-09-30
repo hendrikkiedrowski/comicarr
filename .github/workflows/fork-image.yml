@@ -1,0 +1,66 @@
+# Fork-only: build a Comicarr image from any branch and push it to this fork's
+# GHCR, for running unreleased fixes before they merge upstream. Not part of any
+# PR to upstream — lives on the `fork-ci` branch and is invoked with
+# `gh workflow run fork-image.yml --ref fork-ci -f ref=<branch-to-build>`.
+name: fork-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or SHA to build
+        required: true
+        default: fix/mangadex-language-dedup
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ${{ inputs.ref }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Image tags
+        id: tags
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          slug=$(echo "${{ inputs.ref }}" | tr '/' '-' | tr -cd 'a-zA-Z0-9._-')
+          sha=$(git rev-parse --short HEAD)
+          img="ghcr.io/${owner}/comicarr"
+          {
+            echo "value<<EOF"
+            echo "${img}:${slug}"
+            echo "${img}:sha-${sha}"
+            echo "EOF"
+            echo "sha=${sha}"
+            echo "image=${img}"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.value }}
+          build-args: |
+            COMICARR_BUILD_ID=fork-${{ inputs.ref }}
+            COMICARR_BUILD_COMMIT=${{ steps.tags.outputs.sha }}
+          # ponytail: amd64 only — the cluster node is amd64. Add linux/arm64 here if that changes.
+          platforms: linux/amd64
+          cache-from: type=registry,ref=${{ steps.tags.outputs.image }}:buildcache
+          cache-to: type=registry,ref=${{ steps.tags.outputs.image }}:buildcache,mode=max
+
+      - name: Pushed
+        run: echo "Pushed:${{ '\n' }}${{ steps.tags.outputs.value }}"
