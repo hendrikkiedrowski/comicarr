@@ -471,6 +471,7 @@ class TestMangaRefreshPreservesLibraryState:
             lambda _id: [{"chapter": "1", "title": "Romance Dawn", "language": "en", "publish_at": "1997-07-22T00:00:00"}],
         )
         monkeypatch.setattr("comicarr.mangadex.get_total_chapter_count", lambda _id: 1)
+        monkeypatch.setattr("comicarr.mangadex.get_chapter_volume_map", lambda _id: {})
 
         importer._populate_manga_chapters(
             "mal-13",

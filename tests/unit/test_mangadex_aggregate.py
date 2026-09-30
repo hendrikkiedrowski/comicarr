@@ -78,6 +78,60 @@ class TestGetTotalChapterCount:
         assert mangadex.get_total_chapter_count(MANGA_ID) == 0
 
 
+class TestGetChapterVolumeMap:
+    @patch("comicarr.mangadex._make_request")
+    def test_backfills_volume_for_chapters_missing_from_language_feed(self, mock_request):
+        # ch5/6/7/8 have no English upload (DMCA'd) so the language-filtered
+        # feed carries no volume for them; the unfiltered aggregate still
+        # knows they're in volume 1.
+        from comicarr import mangadex
+
+        mock_request.return_value = {
+            "result": "ok",
+            "volumes": {
+                "1": {"chapters": {"1": {"chapter": "1"}, "5": {"chapter": "5"}, "8": {"chapter": "8"}}},
+                "104": {"chapters": {"1050": {"chapter": "1050"}}},
+            },
+        }
+
+        assert mangadex.get_chapter_volume_map(MANGA_ID) == {
+            "1": "1",
+            "5": "1",
+            "8": "1",
+            "1050": "104",
+        }
+
+    @patch("comicarr.mangadex._make_request")
+    def test_frontier_chapters_stay_unmapped(self, mock_request):
+        # MangaDex keys uncollected/frontier chapters under a "none" volume;
+        # those must be omitted so callers fall back to chapter-search
+        # instead of searching a bogus volume "none".
+        from comicarr import mangadex
+
+        mock_request.return_value = {
+            "result": "ok",
+            "volumes": {"none": {"chapters": {"1191": {"chapter": "1191"}, "1192": {"chapter": "1192"}}}},
+        }
+
+        assert mangadex.get_chapter_volume_map(MANGA_ID) == {}
+
+    @patch("comicarr.mangadex._make_request")
+    def test_empty_volumes_list_returns_empty_map(self, mock_request):
+        from comicarr import mangadex
+
+        mock_request.return_value = {"result": "ok", "volumes": []}
+
+        assert mangadex.get_chapter_volume_map(MANGA_ID) == {}
+
+    @patch("comicarr.mangadex._make_request")
+    def test_failed_request_returns_empty_map(self, mock_request):
+        from comicarr import mangadex
+
+        mock_request.return_value = None
+
+        assert mangadex.get_chapter_volume_map(MANGA_ID) == {}
+
+
 class TestAggregateValues:
     def test_dict_yields_values(self):
         from comicarr import mangadex
